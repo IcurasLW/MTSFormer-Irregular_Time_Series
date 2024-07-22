@@ -23,14 +23,11 @@ class PositionalEncodingTF(nn.Module):
 
     def getPE(self, P_time):
         B = P_time.shape[1]
-
         timescales = self.max_len ** np.linspace(0, 1, self._num_timescales)
-
         times = torch.Tensor(P_time.cpu()).unsqueeze(2)
         scaled_time = times / torch.Tensor(timescales[None, None, :])
         pe = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], axis=-1)  # T x B x d_model
         pe = pe.type(torch.FloatTensor)
-
         if self.d_model % 2 != 0:
             pe = pe[:, :, :-1]
         return pe
@@ -69,7 +66,7 @@ class TemporalConv(nn.Module):
 
 
 
-class SensorTransformer(nn.Module):
+class SensorEncoder(nn.Module):
     def __init__(self, d_inp=36, d_hid=128, n_head=1):
         super().__init__()
         transformer_layer = nn.TransformerEncoderLayer(d_model=d_hid, nhead=n_head, batch_first=True)
@@ -83,29 +80,30 @@ class SensorTransformer(nn.Module):
 
 
 
-class Transformer_Modi_Layer(nn.Module):
-    def __init__(self, d_inp=36, d_hid=128, n_head=1, max_len=215):
+class MTSFormer_Layer(nn.Module):
+    def __init__(self, d_inp=36, d_hid=128, n_head=1):
         super().__init__()
         self.d_inp = d_inp
         self.d_hid = d_hid
         self.local_conv1d = TemporalConv(in_channels=self.d_inp, out_channels=d_hid, kernel_size=7, stride=1, padding='same')
-        glo_att_layer =  nn.TransformerEncoderLayer(d_hid, nhead=1, dropout=0, batch_first=True)
-        self.glob_att = nn.TransformerEncoder(glo_att_layer, num_layers=1)
+        timetoken_enc =  nn.TransformerEncoderLayer(d_hid, nhead=1, dropout=0, batch_first=True)
+        self.timetoken_enc = nn.TransformerEncoder(timetoken_enc, num_layers=1)
         
-        self.sensor_transformer = SensorTransformer(d_inp, d_hid, 1)
+        self.sensor_transformer = SensorEncoder(d_inp, d_hid, 1)
         self.selfatt = nn.MultiheadAttention(d_hid, num_heads=n_head, dropout=0.2)
-        self.layer_norm = nn.LayerNorm(normalized_shape=self.d_hid)
+        self.layer_norm_1 = nn.LayerNorm(normalized_shape=self.d_hid)
         self.feedward = nn.Sequential(nn.Linear(in_features=d_hid, out_features=d_hid*3),
                                       nn.ReLU(),
                                       nn.Linear(in_features=d_hid*3, out_features=d_hid))
         
+        self.layer_norm_2 = nn.LayerNorm(normalized_shape=self.d_hid)
         
     def forward(self, conv_data, att_data, sensor_data):
         conv_data = conv_data.permute(0,2,1)
         conv_data = self.local_conv1d(conv_data)
         conv_data = conv_data.permute(0,2,1)
         
-        att_data = self.glob_att(att_data)
+        att_data = self.timetoken_enc(att_data)
         sensor_data = self.sensor_transformer(sensor_data)
         
         all_data = torch.cat([conv_data, att_data, sensor_data], dim=1)
@@ -114,8 +112,9 @@ class Transformer_Modi_Layer(nn.Module):
         
         all_data_att, _ = self.selfatt(all_data, all_data, all_data)
         all_data = all_data + all_data_att
-        all_data = self.layer_norm(all_data)
+        all_data = self.layer_norm_1(all_data)
         all_data = self.feedward(all_data)
+        all_data = self.layer_norm_2(all_data)
         
         conv_data = all_data[:, :conv_len, :]
         att_data = all_data[:, conv_len:conv_len+att_len, :]
@@ -124,15 +123,15 @@ class Transformer_Modi_Layer(nn.Module):
         return conv_data, att_data, sensor_data
 
 
-class Transformer_Modi(nn.Module):
+class MTSFormer(nn.Module):
     def __init__(self, d_inp=1, d_hid=128, max_len=215, n_layers=4, n_classes=2, n_head=2, dropout=0.2):
         super().__init__()
         self.max_len = max_len
         self.n_layers = n_layers
         self.pos_encoder = PositionalEncodingTF(d_inp, max_len, 10000)
         self.d_hid = d_hid
-        self.Trans_head = Transformer_Modi_Layer(d_inp=d_inp, d_hid=d_hid, n_head=1)
-        self.Trans_modi_layer = Transformer_Modi_Layer(d_inp=self.d_hid, d_hid=self.d_hid, n_head=n_head)
+        self.Trans_head = MTSFormer_Layer(d_inp=d_inp, d_hid=d_hid, n_head=1)
+        self.Trans_modi_layer = MTSFormer_Layer(d_inp=self.d_hid, d_hid=self.d_hid, n_head=n_head)
         self.Transformer_encoder = nn.ModuleList([self.Trans_head] + [self.Trans_modi_layer for _ in range(n_layers - 1)])
         
         self.mlp = nn.Sequential(nn.Linear(self.d_hid*2 + d_inp, self.d_hid*3),
@@ -149,8 +148,6 @@ class Transformer_Modi(nn.Module):
         self.sigmoid_encoder = nn.Sequential(nn.Linear(self.d_hid, self.d_hid),
                                             nn.Sigmoid()
                                             )
-        
-        
         
     def forward(self, data, time, seq_len):
         seq_mask = torch.arange(self.max_len)[None, :] >= (seq_len.cpu()[:, None])

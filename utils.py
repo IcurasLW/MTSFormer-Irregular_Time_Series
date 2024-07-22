@@ -1,10 +1,8 @@
 
 import numpy as np
 import torch
-# from torch_geometric.utils import add_self_loops
-# import pywt
 from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score, precision_score, recall_score, f1_score
-
+import os
 
 
 def random_split(n=11988, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1):
@@ -24,7 +22,7 @@ def random_split(n=11988, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1):
     return idx_train, idx_val, idx_test
 
 
-def get_data_split(base_path, split_path, split_type='random', reverse=False, baseline=True, dataset='P12', predictive_label='mortality'):
+def get_data_split(base_path, split_path, split_type='random', reverse=False, baseline=True, dataset='P12'):
     # load data
     if dataset == 'P12':
         Pdict_list = np.load(base_path + '/processed_data/PTdict_list.npy', allow_pickle=True)
@@ -112,14 +110,7 @@ def get_data_split(base_path, split_path, split_type='random', reverse=False, ba
     Pval = Pdict_list[idx_val]
     Ptest = Pdict_list[idx_test]
 
-    if dataset == 'P12' or dataset == 'P19' or dataset == 'PAM':
-        if predictive_label == 'mortality':
-            y = arr_outcomes[:, -1].reshape((-1, 1))
-        elif predictive_label == 'LoS':  # for P12 only
-            y = arr_outcomes[:, 3].reshape((-1, 1))
-            y = np.array(list(map(lambda los: 0 if los <= 3 else 1, y)))[..., np.newaxis]
-    elif dataset == 'eICU':
-        y = arr_outcomes[..., np.newaxis]
+    y = arr_outcomes[:, -1].reshape((-1, 1))
     ytrain = y[idx_train]
     yval = y[idx_val]
     ytest = y[idx_test]
@@ -260,49 +251,51 @@ def random_sample(idx_0, idx_1, B, replace=False):
     idx = np.concatenate([idx0_batch, idx1_batch], axis=0)
     return idx
 
+def sample_data(args, Pval_tensor, Ptest_tensor):
+    num_all_features =int(Pval_tensor.shape[2] / 2)
+    num_missing_features = round(args.missingratio * num_all_features)
+    for i, patient in enumerate(Pval_tensor):
+        idx = np.random.choice(num_all_features, num_missing_features, replace=False)
+        patient[:, idx] = torch.zeros(Pval_tensor.shape[1], num_missing_features)
+        Pval_tensor[i] = patient
+    for i, patient in enumerate(Ptest_tensor):
+        idx = np.random.choice(num_all_features, num_missing_features, replace=False)
+        patient[:, idx] = torch.zeros(Ptest_tensor.shape[1], num_missing_features)
+        Ptest_tensor[i] = patient
 
-def evaluate(model, P_tensor, P_time_tensor, P_static_tensor, batch_size=100, n_classes=2, static=1):
-    model.eval()
-    P_tensor = P_tensor.cuda()
-    P_time_tensor = P_time_tensor.cuda()
-    if static is None:
-        Pstatic = None
+
+def evaluate_metrics(args, y_true, y_pred_score, y_pred, mode='Training', n_classes=2):
+    base_path = './results'
+    filename = f'{mode}_{args.dataset}_{args.missingratio}_results.csv'
+    path = os.path.join(base_path, filename)
+    if n_classes != 2:
+        acc = accuracy_score(y_true, y_pred)
+        auc = roc_auc_score(y_true, y_pred_score, average='macro', multi_class='ovr')
+        aupr = average_precision_score(y_true, y_pred_score, average='macro')
+        f1 = f1_score(y_true, y_pred, average='macro')
+        pr_score = precision_score(y_true, y_pred, average='macro')
+        re_score = recall_score(y_true, y_pred, average='macro')
     else:
-        P_static_tensor = P_static_tensor.cuda()
-        N, Fs = P_static_tensor.shape
+        acc = accuracy_score(y_true, y_pred)
+        auc = roc_auc_score(y_true, y_pred_score[:, 1])
+        aupr = average_precision_score(y_true, y_pred_score[:, 1])
+        f1 = f1_score(y_true, y_pred)
+        pr_score = precision_score(y_true, y_pred)
+        re_score = recall_score(y_true, y_pred)
+    
+    new_result = {
+        'auc': [round(auc, 4)],
+        'aupr': [round(aupr, 4)],
+        'acc': [round(acc, 4)],
+        'f1': [round(f1, 4)],
+        'precision': [round(pr_score, 4)],
+        'recall': [round(re_score, 4)]
+    }
+    new_result = pd.DataFrame(new_result)
 
-    T, N, Ff = P_tensor.shape
-    n_batches, rem = N // batch_size, N % batch_size
-    out = torch.zeros(N, n_classes)
-    start = 0
-    for i in range(n_batches):
-        P = P_tensor[:, start:start + batch_size, :]
-        Ptime = P_time_tensor[:, start:start + batch_size]
-        if P_static_tensor is not None:
-            Pstatic = P_static_tensor[start:start + batch_size]
-        lengths = torch.sum(Ptime > 0, dim=0)
-        middleoutput, _, _ = model.forward(P, Pstatic, Ptime, lengths)
-        out[start:start + batch_size] = middleoutput.detach().cpu()
-        start += batch_size
-    if rem > 0:
-        P = P_tensor[:, start:start + rem, :]
-        Ptime = P_time_tensor[:, start:start + rem]
-        if P_static_tensor is not None:
-            Pstatic = P_static_tensor[start:start + batch_size]
-        lengths = torch.sum(Ptime > 0, dim=0)
-        whatever, _, _ = model.forward(P, Pstatic, Ptime, lengths)
-        out[start:start + rem] = whatever.detach().cpu()
-    return out
-
-
-def evaluate_standard(model, P_tensor, P_time_tensor, P_static_tensor, batch_size=100, n_classes=2, static=1):
-    P_tensor = P_tensor.cuda()
-    P_time_tensor = P_time_tensor.cuda()
-    if static is None:
-        P_static_tensor = None
-    else:
-        P_static_tensor = P_static_tensor.cuda()
-
-    lengths = torch.sum(P_time_tensor > 0, dim=0)
-    out, _, _ = model.forward(P_tensor, P_static_tensor, P_time_tensor, lengths)
-    return out
+    if os.path.exists(path):
+        df = pd.read_csv(path)
+        new_result = pd.concat([df, new_result], ignore_index=True)
+        
+    new_result.to_csv(path, index=False)
+    return new_result
