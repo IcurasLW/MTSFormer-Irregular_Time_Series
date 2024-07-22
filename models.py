@@ -116,9 +116,9 @@ class MTSFormer_Layer(nn.Module):
         all_data_2 = self.feedward(all_data_1)
         all_data_2 = self.layer_norm_2(all_data_2 + all_data_1)
         
-        conv_data = all_data[:, :conv_len, :]
-        att_data = all_data[:, conv_len:conv_len+att_len, :]
-        sensor_data = all_data[:, conv_len+att_len:, :]
+        conv_data = all_data_2[:, :conv_len, :]
+        att_data = all_data_2[:, conv_len:conv_len+att_len, :]
+        sensor_data = all_data_2[:, conv_len+att_len:, :]
 
         return conv_data, att_data, sensor_data
 

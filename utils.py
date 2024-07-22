@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from sklearn.metrics import accuracy_score, roc_auc_score, average_precision_score, precision_score, recall_score, f1_score
 import os
+import pandas as pd
 
 
 def random_split(n=11988, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1):
@@ -266,7 +267,7 @@ def sample_data(args, Pval_tensor, Ptest_tensor):
 
 def evaluate_metrics(args, y_true, y_pred_score, y_pred, mode='Training', n_classes=2):
     base_path = './results'
-    filename = f'{mode}_{args.dataset}_{args.missingratio}_results.csv'
+    filename = f'{mode}_results.csv'
     path = os.path.join(base_path, filename)
     if n_classes != 2:
         acc = accuracy_score(y_true, y_pred)

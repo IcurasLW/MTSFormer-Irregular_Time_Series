@@ -24,19 +24,18 @@ torch.set_default_dtype(torch.float32)
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--dataset', type=str, default='P19', choices=['P12', 'P19', 'PAM']) #
+parser.add_argument('--dataset', type=str, default='P12', choices=['P12', 'P19', 'PAM']) #
 parser.add_argument('--missingratio', type=float, default=0) #
-parser.add_argument('--feature_removal_level', type=str, default='no_remove', choices=['no_remove', 'sample'],
-                    help='use this only when splittype==random; otherwise, set as no_removal') #
+parser.add_argument('--feature_removal_level', type=str, default='no_remove', choices=['no_remove', 'sample'])
 args, unknown = parser.parse_known_args()
 
 
 if args.dataset == 'P12':
-    base_path = './P12data'
+    base_path = '../data/P12data'
 elif args.dataset == 'P19':
-    base_path = './P19data'
+    base_path = '../data/P19data'
 elif args.dataset == 'PAM':
-    base_path = './PAMdata'
+    base_path = '../data/PAMdata'
 
 
 if args.dataset == 'P12':
@@ -113,7 +112,7 @@ def Multiclass_training(args, model, loss_fn, optimizer, data, length_tensor, ti
         losses.append(loss.item())
         
     y_pred_score = np.stack(y_pred_score)
-    evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Training_{args.dataset}_split_{split_idx}_{args.feature_removal_level}_missing_rate_{args.missingratiol}', n_classes=n_classes)
+    evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Training_{args.dataset}_split_{split_idx}_{args.feature_removal_level}_missing_rate_{args.missingratio}', n_classes=n_classes)
 
 
 
@@ -162,7 +161,7 @@ def Binary_training(args, model, loss_fn, optimizer, data, length_tensor, time_t
         losses.append(loss.item())
         
     y_pred_score = np.stack(y_pred_score)
-    evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Training_{args.dataset}_split_{split_idx}_{args.feature_removal_level}_missing_rate_{args.missingratiol}', n_classes=n_classes)
+    evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Training_{args.dataset}_split_{split_idx}_{args.feature_removal_level}_missing_rate_{args.missingratio}', n_classes=n_classes)
 
 
 def validation(args, model, loss_fn, data, length_tensor, time_tensor, y_true, batch_size, n_classes, split_id):
@@ -187,7 +186,7 @@ def validation(args, model, loss_fn, data, length_tensor, time_tensor, y_true, b
         y_true = y_true.detach().cpu().numpy()
         losses = np.mean(losses)
         y_pred_score = np.stack(y_pred_score)
-        val_metrics = evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Validation_{args.dataset}_split_{split_idx}_{args.feature_removal_level}_missing_rate_{args.missingratiol}', n_classes=n_classes)
+        val_metrics = evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Validation_{args.dataset}_split_{split_idx}_{args.feature_removal_level}_missing_rate_{args.missingratio}', n_classes=n_classes)
         return val_metrics
 
 
@@ -218,7 +217,7 @@ def testing(args, model_path, data, d_inp, d_hid, n_layers, n_head, length_tenso
             
         y_true = y_true.detach().cpu().numpy()
         y_pred_score = np.stack(y_pred_score)
-        evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Testing_{args.missingratio}', n_classes=n_classes)
+        evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Testing_{args.dataset}_split_{split_idx}_{args.feature_removal_level}_missing_rate_{args.missingratio}', n_classes=n_classes)
 
 
 
@@ -240,7 +239,7 @@ def observe_testing(args, model, loss_fn, data, length_tensor, time_tensor, y_tr
             
         y_true = y_true.detach().cpu().numpy()
         y_pred_score = np.stack(y_pred_score)
-        evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Observe_Testing_{args.dataset}_split_{split_idx}_{args.feature_removal_level}_missing_rate_{args.missingratiol}', n_classes=n_classes)
+        evaluate_metrics(args, y_true, y_pred_score, y_pred, mode=f'Observe_Testing_{args.dataset}_split_{split_idx}_{args.feature_removal_level}_missingrate_{args.missingratio}', n_classes=n_classes)
 
 
 
@@ -330,7 +329,7 @@ for k in range(n_splits):
                              dropout=dropout).to(DEVICE)
     
     loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.0001, momentum=0.9, weight_decay=1e-5)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.0005, momentum=0.9, weight_decay=1e-5)
 
     n_epoch = 50
     max_metric = 0
@@ -375,7 +374,7 @@ for k in range(n_splits):
         cur_metric = val_metrics[save_critiria].values[-1]
         if max_metric < cur_metric:
             directory = './best_model'
-            model_savepath = os.path.join(directory, f'MTSFormer_{args.dataset}_split_{split_idx}_missing_rate_{args.missingratiol}.pth')
+            model_savepath = os.path.join(directory, f'MTSFormer_{args.dataset}_split_{split_idx}_missing_rate_{args.missingratio}.pth')
             if not os.path.exists(directory):
                 os.makedirs(directory)
             
@@ -383,16 +382,16 @@ for k in range(n_splits):
             max_metric = cur_metric
         
         # Testing
-        # observe_testing(args = args,
-        #         model = model, 
-        #         loss_fn = loss_fn,
-        #         data = Ptest_tensor, 
-        #         length_tensor = Ptest_length_tensor, 
-        #         time_tensor = Ptest_time, 
-        #         y_true = ytest_tensor, 
-        #         batch_size = batch_size, 
-        #         n_classes = n_classes,
-        #         split_id = split_idx)
+        observe_testing(args = args,
+                model = model, 
+                loss_fn = loss_fn,
+                data = Ptest_tensor, 
+                length_tensor = Ptest_length_tensor, 
+                time_tensor = Ptest_time, 
+                y_true = ytest_tensor, 
+                batch_size = batch_size, 
+                n_classes = n_classes,
+                split_id = split_idx)
 
     del model
     testing(args = args,
