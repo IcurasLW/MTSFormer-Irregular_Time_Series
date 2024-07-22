@@ -112,9 +112,9 @@ class MTSFormer_Layer(nn.Module):
         
         all_data_att, _ = self.selfatt(all_data, all_data, all_data)
         all_data = all_data + all_data_att
-        all_data = self.layer_norm_1(all_data)
-        all_data = self.feedward(all_data)
-        all_data = self.layer_norm_2(all_data)
+        all_data_1 = self.layer_norm_1(all_data)
+        all_data_2 = self.feedward(all_data_1)
+        all_data_2 = self.layer_norm_2(all_data_2 + all_data_1)
         
         conv_data = all_data[:, :conv_len, :]
         att_data = all_data[:, conv_len:conv_len+att_len, :]
